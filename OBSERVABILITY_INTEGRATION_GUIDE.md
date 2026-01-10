@@ -5,7 +5,7 @@ This guide explains how to integrate the Observability Service into any applicat
 ## Overview
 
 The Observability Service is a standalone service that collects and stores:
-- **User Events**: General user behavior events (page views, actions, etc.)
+- **User Events**: General user behavior events (page views, actions, etc.) - *Note: page_view events are tracked via OpenTelemetry/Loki only (not stored in database)*
 - **UI Events**: Detailed UI interactions (clicks, form changes, etc.)
 - **UI Errors**: Frontend JavaScript errors
 - **Service Errors**: Backend/API errors
@@ -109,6 +109,7 @@ const OBSERVABILITY_URL = import.meta.env.VITE_OBSERVABILITY_URL || 'http://loca
 
 /**
  * Track a general user event
+ * Stores event in database AND sends to OpenTelemetry/Loki
  */
 export async function trackEvent(
   eventType: string,
@@ -132,6 +133,27 @@ export async function trackEvent(
     // Silently fail - don't break the app
     console.debug('Failed to track event:', error);
   }
+}
+
+/**
+ * Track event via OpenTelemetry only (Loki/Grafana stack)
+ * Does NOT store in database - only sends to distributed tracing/logs
+ * Use this for high-volume events like page_view that you want in logs but not in database
+ */
+export function trackEventTelemetryOnly(
+  eventType: string,
+  metadata: Record<string, any> = {}
+): void {
+  // Creates OpenTelemetry span that goes to Loki/Grafana stack
+  // No database API call
+  const tracer = trace.getTracer('your-app-name');
+  const span = tracer.startSpan(`user.${eventType}`);
+  
+  Object.entries(metadata).forEach(([key, value]) => {
+    span.setAttribute(key, String(value));
+  });
+  
+  span.end();
 }
 
 /**
@@ -486,15 +508,18 @@ function MyForm() {
 If you prefer manual tracking or need more control:
 
 ```typescript
-import { trackEvent, trackUIEvent, trackUIError, trackServiceError } from './utils/observability';
+import { trackEvent, trackEventTelemetryOnly, trackUIEvent, trackUIError, trackServiceError } from './utils/observability';
 
-// Track page view
+// Track page view via OpenTelemetry only (Loki/Grafana stack, not in database)
 useEffect(() => {
-  trackEvent('page_view', {
+  trackEventTelemetryOnly('page_view', {
     page: location.pathname,
     timestamp: new Date().toISOString(),
   });
 }, [location.pathname]);
+
+// Or track to database as well:
+// trackEvent('page_view', { page: location.pathname });
 
 // Track button click manually
 const handleClick = () => {
@@ -604,8 +629,8 @@ import { useEffect } from 'react';
 
 function SignupPage() {
   useEffect(() => {
-    // Track page view
-    trackEvent('page_view', {
+    // Track page view via OpenTelemetry only (Loki/Grafana stack, not in database)
+    trackEventTelemetryOnly('page_view', {
       page: '/signup',
       category: 'navigation',
     });
@@ -826,6 +851,8 @@ Create a user event.
   "service_name": "your-app"
 }
 ```
+
+**Note:** `page_view` events are tracked via OpenTelemetry only (Loki/Grafana stack) and are not stored in the database. They appear in distributed tracing and logs but not in the `user_events` table. To store page views in the database, use `trackEvent('page_view', {...})` instead of `trackEventTelemetryOnly('page_view', {...})`.
 
 #### POST `/ui-events`
 Create a UI interaction event.
@@ -1051,7 +1078,7 @@ ORDER BY date DESC, error_count DESC;
 # Get events for user
 curl "http://localhost:8006/events?user_id=123&limit=100"
 
-# Get events by type
+# Get events by type (note: page_view events are tracked via OpenTelemetry/Loki only, not in database)
 curl "http://localhost:8006/events?event_type=page_view&limit=50"
 
 # Get UI events

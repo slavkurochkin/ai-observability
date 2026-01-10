@@ -84,6 +84,23 @@ function getUserId(): number | null {
   return null;
 }
 
+/**
+ * Track event only via OpenTelemetry (Loki/Grafana stack) without storing in database
+ * Use this for events that should only be tracked in distributed tracing/logs
+ */
+export function trackEventTelemetryOnly(eventName: string, metadata: Record<string, any> = {}): void {
+  // Create OpenTelemetry span for tracing (goes to Loki/Grafana stack)
+  const tracer = trace.getTracer('observability-demo-frontend');
+  const span = tracer.startSpan(`user.${eventName}`);
+  
+  Object.entries(metadata).forEach(([key, value]) => {
+    span.setAttribute(key, String(value));
+  });
+  
+  span.end();
+  // Note: No database API call - only OpenTelemetry tracing
+}
+
 export async function trackEvent(eventName: string, metadata: Record<string, any> = {}): Promise<void> {
   // Create OpenTelemetry span for tracing
   const tracer = trace.getTracer('observability-demo-frontend');

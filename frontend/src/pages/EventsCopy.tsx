@@ -1,0 +1,245 @@
+import { useState, useEffect } from 'react'
+import './EventsCopy.css'
+
+const API_BASE_URL = 'http://localhost:8006'
+
+interface TimeFrame {
+  label: string
+  minutes: number
+}
+
+const TIME_FRAMES: TimeFrame[] = [
+  { label: 'Last 5 Minutes', minutes: 5 },
+  { label: 'Last 15 Minutes', minutes: 15 },
+  { label: 'Last 30 Minutes', minutes: 30 },
+  { label: 'Last Hour', minutes: 60 },
+  { label: 'Last 6 Hours', minutes: 360 },
+  { label: 'Last 24 Hours', minutes: 1440 },
+]
+
+interface EventSection {
+  id: 'uiEvents' | 'userEvents' | 'uiErrors' | 'serviceErrors'
+  label: string
+  enabled: boolean
+  data: any[]
+  loading: boolean
+}
+
+export default function EventsCopy() {
+  const [selectedTimeFrame, setSelectedTimeFrame] = useState<TimeFrame>(TIME_FRAMES[0]) // Default: Last 5 Minutes
+  const [sections, setSections] = useState<EventSection[]>([
+    { id: 'uiEvents', label: 'UI Events', enabled: true, data: [], loading: false },
+    { id: 'userEvents', label: 'User Events', enabled: true, data: [], loading: false },
+    { id: 'uiErrors', label: 'UI Errors', enabled: true, data: [], loading: false },
+    { id: 'serviceErrors', label: 'Service Errors', enabled: true, data: [], loading: false },
+  ])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const fetchData = async () => {
+    setLoading(true)
+    setError(null)
+
+    try {
+      const endDate = new Date()
+      const startDate = new Date(endDate.getTime() - selectedTimeFrame.minutes * 60 * 1000)
+
+      const startDateISO = startDate.toISOString()
+      const endDateISO = endDate.toISOString()
+
+      // Fetch all data in parallel
+      const [uiEventsRes, userEventsRes, uiErrorsRes, serviceErrorsRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/ui-events?start_date=${startDateISO}&end_date=${endDateISO}&limit=10000`),
+        fetch(`${API_BASE_URL}/events?start_date=${startDateISO}&end_date=${endDateISO}&limit=10000`),
+        fetch(`${API_BASE_URL}/errors/ui?start_date=${startDateISO}&end_date=${endDateISO}&limit=10000`),
+        fetch(`${API_BASE_URL}/errors/services?start_date=${startDateISO}&end_date=${endDateISO}&limit=10000`),
+      ])
+
+      if (!uiEventsRes.ok || !userEventsRes.ok || !uiErrorsRes.ok || !serviceErrorsRes.ok) {
+        throw new Error('Failed to fetch data from observability service')
+      }
+
+      const [uiEvents, userEvents, uiErrors, serviceErrors] = await Promise.all([
+        uiEventsRes.json(),
+        userEventsRes.json(),
+        uiErrorsRes.json(),
+        serviceErrorsRes.json(),
+      ])
+
+      setSections((prevSections) => [
+        { id: 'uiEvents', label: 'UI Events', enabled: prevSections[0].enabled, data: uiEvents, loading: false },
+        { id: 'userEvents', label: 'User Events', enabled: prevSections[1].enabled, data: userEvents, loading: false },
+        { id: 'uiErrors', label: 'UI Errors', enabled: prevSections[2].enabled, data: uiErrors, loading: false },
+        { id: 'serviceErrors', label: 'Service Errors', enabled: prevSections[3].enabled, data: serviceErrors, loading: false },
+      ])
+    } catch (err: any) {
+      setError(err.message || 'Failed to load events')
+      console.error('Events fetch error:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchData()
+  }, [selectedTimeFrame])
+
+  const toggleSection = (sectionId: string) => {
+    setSections((prev) =>
+      prev.map((section) =>
+        section.id === sectionId ? { ...section, enabled: !section.enabled } : section
+      )
+    )
+  }
+
+  const copyEvents = async () => {
+    const enabledSections = sections.filter((section) => section.enabled)
+
+    if (enabledSections.length === 0) {
+      alert('Please select at least one section to copy')
+      return
+    }
+
+    const output: any = {
+      time_frame: {
+        label: selectedTimeFrame.label,
+        minutes: selectedTimeFrame.minutes,
+        start_time: new Date(Date.now() - selectedTimeFrame.minutes * 60 * 1000).toISOString(),
+        end_time: new Date().toISOString(),
+      },
+      events: {},
+    }
+
+    sections.forEach((section) => {
+      if (section.enabled) {
+        switch (section.id) {
+          case 'uiEvents':
+            output.events.ui_events = section.data
+            break
+          case 'userEvents':
+            output.events.user_events = section.data
+            break
+          case 'uiErrors':
+            output.events.ui_errors = section.data
+            break
+          case 'serviceErrors':
+            output.events.service_errors = section.data
+            break
+        }
+      }
+    })
+
+    const formattedOutput = JSON.stringify(output, null, 2)
+
+    try {
+      await navigator.clipboard.writeText(formattedOutput)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      // Fallback for browsers that don't support clipboard API
+      const textArea = document.createElement('textarea')
+      textArea.value = formattedOutput
+      textArea.style.position = 'fixed'
+      textArea.style.opacity = '0'
+      document.body.appendChild(textArea)
+      textArea.select()
+      try {
+        document.execCommand('copy')
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      } catch (fallbackErr) {
+        alert('Failed to copy to clipboard. Please copy manually.')
+        console.error('Copy failed:', fallbackErr)
+      }
+      document.body.removeChild(textArea)
+    }
+  }
+
+  const getSectionCount = (sectionId: string) => {
+    const section = sections.find((s) => s.id === sectionId)
+    return section?.data.length || 0
+  }
+
+  return (
+    <div className="events-copy">
+      <div className="events-copy-header">
+        <h1>Copy Events for LLM</h1>
+        <div className="header-controls">
+          <div className="time-frame-selector">
+            <label htmlFor="time-frame">Time Frame:</label>
+            <select
+              id="time-frame"
+              value={selectedTimeFrame.minutes}
+              onChange={(e) => {
+                const minutes = parseInt(e.target.value)
+                const frame = TIME_FRAMES.find((f) => f.minutes === minutes) || TIME_FRAMES[0]
+                setSelectedTimeFrame(frame)
+              }}
+            >
+              {TIME_FRAMES.map((frame) => (
+                <option key={frame.minutes} value={frame.minutes}>
+                  {frame.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            className="copy-button"
+            onClick={copyEvents}
+            disabled={loading || sections.filter((s) => s.enabled).length === 0}
+          >
+            {copied ? '✓ Copied!' : 'Copy Events'}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="error-message">
+          <p>Error: {error}</p>
+          <button onClick={fetchData}>Retry</button>
+        </div>
+      )}
+
+      {loading && (
+        <div className="loading-message">
+          <p>Loading events...</p>
+        </div>
+      )}
+
+      <div className="events-sections">
+        {sections.map((section) => (
+          <div key={section.id} className="event-section">
+            <div className="section-header">
+              <label className="section-checkbox">
+                <input
+                  type="checkbox"
+                  checked={section.enabled}
+                  onChange={() => toggleSection(section.id)}
+                />
+                <span className="section-title">
+                  {section.label} ({getSectionCount(section.id)})
+                </span>
+              </label>
+            </div>
+            {section.enabled && (
+              <div className="section-content">
+                {section.data.length === 0 ? (
+                  <p className="no-events">No events found in this time frame</p>
+                ) : (
+                  <div className="events-list">
+                    {section.data.map((event) => (
+                      <div key={event.id} className="event-item">
+                        <pre className="event-json">{JSON.stringify(event, null, 2)}</pre>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}

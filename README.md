@@ -5,7 +5,7 @@ A standalone observability service for tracking user events, UI interactions, an
 ## Overview
 
 The Observability Service provides:
-- **User Event Tracking**: General user behavior events (page views, actions, etc.)
+- **User Event Tracking**: General user behavior events (page views, actions, etc.) - *Note: page_view events are tracked via OpenTelemetry/Loki only (not stored in database)*
 - **UI Event Tracking**: Detailed UI interactions (clicks, form changes, etc.)
 - **Error Tracking**: Frontend JavaScript errors and backend/API errors
 - **Analytics API**: Query and analyze collected data

@@ -1,7 +1,7 @@
 import { ReactNode } from 'react'
-import { useObservability } from '../contexts/ObservabilityContext'
 import { useEffect } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, NavLink } from 'react-router-dom'
+import { trackEventTelemetryOnly } from '../utils/otel'
 import './Layout.css'
 
 interface LayoutProps {
@@ -9,23 +9,25 @@ interface LayoutProps {
 }
 
 export default function Layout({ children }: LayoutProps) {
-  const { trackEvent } = useObservability()
   const location = useLocation()
 
   useEffect(() => {
-    // Track page views
-    trackEvent('page_view', {
+    // Track page views via OpenTelemetry only (Loki/Grafana stack)
+    // Not stored in database, only in distributed tracing/logs
+    trackEventTelemetryOnly('page_view', {
       page: location.pathname,
       timestamp: new Date().toISOString(),
     })
-  }, [location.pathname, trackEvent])
+  }, [location.pathname])
 
   return (
     <div id="layout" className="layout">
       <header id="layout-header" className="layout-header">
-        <h1 id="layout-title">Observability Service Demo</h1>
+        <h1 id="layout-title">Observability Service</h1>
         <nav id="layout-nav">
-          <a id="nav-home" href="/">Home</a>
+          <NavLink id="nav-events" to="/">Events</NavLink>
+          <NavLink id="nav-dashboard" to="/dashboard">Dashboard</NavLink>
+          <NavLink id="nav-demo" to="/demo">Demo</NavLink>
         </nav>
       </header>
       <main id="layout-main" className="layout-main">
