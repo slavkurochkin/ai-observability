@@ -1,0 +1,188 @@
+services:
+  # Observability Service
+  observability-service:
+    build:
+      context: ./services/observability-service
+      dockerfile: Dockerfile
+    ports:
+      - "8006:8006"
+    environment:
+      - DATABASE_URL=postgresql://eval_user:eval_pass@observability-db:5432/observability_db
+      - OTEL_COLLECTOR_URL=http://otel-collector:4317
+      - EVENT_RETENTION_DAYS=90  # Keep events for 90 days
+      - CLEANUP_INTERVAL_HOURS=24  # Run cleanup daily
+      - ENABLE_AUTO_CLEANUP=true  # Enable automatic cleanup
+    depends_on:
+      observability-db:
+        condition: service_healthy
+    networks:
+      - observability-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Observability Service Database
+  observability-db:
+    image: postgres:15-alpine
+    ports:
+      - "5437:5432"  # Different port to avoid conflicts with other DBs
+    environment:
+      - POSTGRES_USER=eval_user
+      - POSTGRES_PASSWORD=eval_pass
+      - POSTGRES_DB=observability_db
+    volumes:
+      - observability-db-data:/var/lib/postgresql/data
+    networks:
+      - observability-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eval_user -d observability_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # OpenTelemetry Collector (optional - for distributed tracing)
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./config/otel-collector.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8889:8889"   # Prometheus metrics exporter
+    depends_on:
+      tempo:
+        condition: service_started
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
+    networks:
+      - observability-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:13133"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # Tempo - Distributed Tracing (optional)
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./config/tempo-config.yaml:/etc/tempo.yaml
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200"   # Tempo HTTP
+    networks:
+      - observability-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3200/ready || curl -f http://localhost:3200/ready || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  # Loki - Log Aggregation (optional)
+  loki:
+    image: grafana/loki:latest
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki
+      - ./config/loki-config.yaml:/etc/loki/local-config.yaml
+    networks:
+      - observability-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready || curl -f http://localhost:3100/ready || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 15
+      start_period: 120s
+    restart: unless-stopped
+
+  # Promtail - Log Collector (optional)
+  promtail:
+    image: grafana/promtail:latest
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./config/promtail-config.yml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - observability-network
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  # Prometheus - Metrics (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus-data:/prometheus
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    networks:
+      - observability-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Grafana - Visualization (optional)
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"  # Different port from frontend (3000)
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+      - GF_DATABASE_PROVISIONING_ERROR_WHEN_SAVE=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+    depends_on:
+      tempo:
+        condition: service_started
+      loki:
+        condition: service_started
+      prometheus:
+        condition: service_started
+      observability-db:
+        condition: service_healthy
+    networks:
+      - observability-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+volumes:
+  tempo-data:
+  loki-data:
+  prometheus-data:
+  grafana-data:
+  observability-db-data:
+
+networks:
+  observability-network:
+    driver: bridge

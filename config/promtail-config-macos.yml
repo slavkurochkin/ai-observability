@@ -1,0 +1,26 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # For macOS/Windows: Use syslog or file-based scraping
+  # Since Docker runs in a VM, we can't access /var/lib/docker/containers directly
+  # Instead, we'll rely on OTEL Collector for logs, or use Docker logging driver
+  
+  # Alternative: Scrape from Docker API (if accessible)
+  - job_name: docker-api
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: docker-logs
+          __path__: /var/log/*.log
+    # Note: This won't work on macOS without additional setup
+    # Recommended: Use OpenTelemetry logging instead
+
