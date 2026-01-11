@@ -388,11 +388,19 @@ class UIEventCreate(BaseModel):
 class UIEventResponse(BaseModel):
     id: int
     user_id: Optional[int]
+    session_id: Optional[str]
     interaction_type: str
     element_type: Optional[str]
     element_name: Optional[str]
+    element_id: Optional[str]
     page_path: Optional[str]
     page_context: Optional[str]
+    route_name: Optional[str]
+    event_value: Optional[str]
+    event_metadata: Optional[Dict[str, Any]]
+    viewport_width: Optional[int]
+    viewport_height: Optional[int]
+    device_type: Optional[str]
     timestamp: datetime
     
     class Config:
