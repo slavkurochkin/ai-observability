@@ -67,7 +67,60 @@ curl -X POST http://localhost:8006/events \
 
 ## Frontend Integration
 
-### Step 1: Install Dependencies (Optional - for OpenTelemetry tracing)
+There are two ways to integrate observability into your frontend:
+
+### Option A: Use the npm Package (Recommended)
+
+The `@ai-observability/client` package provides tracked components, hooks, and utilities out of the box.
+
+#### Published Package (when available)
+
+```bash
+npm install @ai-observability/client
+```
+
+#### Local Development (npm link)
+
+If developing locally or the package isn't published yet:
+
+```bash
+# In the observability-client package directory
+cd packages/observability-client
+npm run link   # Builds, cleans React, and links
+
+# In your application
+npm link @ai-observability/client
+```
+
+> [!IMPORTANT]
+> After linking, restart your dev server. The `npm run link` script automatically removes the package's local React to prevent duplicate React instance errors.
+
+Then use the package:
+
+```typescript
+import { initObservability, TrackedButton, trackEvent } from '@ai-observability/client';
+
+// Initialize in your app entry point
+initObservability({
+  serviceUrl: 'http://localhost:8006',
+  serviceName: 'my-app',
+});
+
+// Use tracked components
+<TrackedButton trackContext="my_page" buttonName="submit">
+  Submit
+</TrackedButton>
+```
+
+See the [package README](packages/observability-client/README.md) for full API documentation.
+
+---
+
+### Option B: Manual Integration
+
+If you prefer to copy the utilities directly into your project:
+
+#### Step 1: Install Dependencies (Optional - for OpenTelemetry tracing)
 
 If you want distributed tracing, install OpenTelemetry:
 
@@ -75,7 +128,7 @@ If you want distributed tracing, install OpenTelemetry:
 npm install @opentelemetry/api @opentelemetry/sdk-trace-web @opentelemetry/exporter-trace-otlp-http @opentelemetry/auto-instrumentations-web
 ```
 
-### Step 2: Create Observability Utility
+#### Step 2: Create Observability Utility
 
 Create a file `src/utils/observability.ts`:
 
@@ -370,7 +423,7 @@ async function exampleFetchWithErrorTracking() {
 }
 ```
 
-### Step 3: Use Tracked Components (Recommended)
+#### Step 3: Use Tracked Components (Recommended)
 
 The easiest way to track UI events is using the tracked components. These automatically track interactions without manual calls.
 
@@ -503,7 +556,7 @@ function MyForm() {
 
 **Important:** Always provide an `id` prop to all tracked components. This ID is stored in the `element_id` field in the observability database.
 
-### Step 4: Manual Tracking (Alternative)
+#### Step 4: Manual Tracking (Alternative)
 
 If you prefer manual tracking or need more control:
 
@@ -620,7 +673,7 @@ window.addEventListener('error', (event) => {
 });
 ```
 
-### Step 5: Complete Example with Tracked Components
+#### Step 5: Complete Example with Tracked Components
 
 ```typescript
 import { TrackedButton, TrackedInput, TrackedCheckbox } from './components';

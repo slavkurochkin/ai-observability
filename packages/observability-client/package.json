@@ -1,0 +1,54 @@
+{
+  "name": "@ai-observability/client",
+  "version": "1.0.0",
+  "description": "Frontend observability client for tracking user events, UI interactions, and errors",
+  "main": "dist/index.js",
+  "module": "dist/index.esm.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.esm.js",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint src --ext .ts,.tsx",
+    "prepublishOnly": "npm run build",
+    "clean-react": "rm -rf node_modules/react node_modules/react-dom node_modules/.cache",
+    "prelink": "npm run clean-react",
+    "link": "npm run build && npm link",
+    "pack": "npm run build && npm pack"
+  },
+  "keywords": [
+    "observability",
+    "tracking",
+    "analytics",
+    "telemetry",
+    "opentelemetry",
+    "monitoring"
+  ],
+  "author": "",
+  "license": "MIT",
+  "peerDependencies": {
+    "react": ">=16.8.0"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.8.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.2.0"
+  }
+}

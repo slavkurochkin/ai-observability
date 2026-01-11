@@ -40,14 +40,11 @@ exporters:
   prometheus:
     endpoint: "0.0.0.0:8889"
   
-  # Export logs to Loki
-  loki:
-    endpoint: http://loki:3100/loki/api/v1/push
-    labels:
-      resource:
-        service.name: "service_name"
-        deployment.environment: "environment"
-    tenant_id: "1"
+  # Export logs to Loki via OTLP (Loki exporter is deprecated, use OTLP instead)
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+    tls:
+      insecure: true
 
 service:
   pipelines:
@@ -64,7 +61,7 @@ service:
     logs:
       receivers: [otlp]
       processors: [memory_limiter, batch, resource]
-      exporters: [loki]
+      exporters: [otlphttp/loki]
   
   extensions: []
 
