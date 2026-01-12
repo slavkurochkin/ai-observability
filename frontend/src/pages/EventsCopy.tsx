@@ -40,6 +40,7 @@ export default function EventsCopy() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [copiedSection, setCopiedSection] = useState<string | null>(null)
 
   const fetchData = async () => {
     setLoading(true)
@@ -116,6 +117,77 @@ export default function EventsCopy() {
         section.id === sectionId ? { ...section, enabled: !section.enabled } : section
       )
     )
+  }
+
+  const copySection = async (sectionId: string) => {
+    const section = sections.find((s) => s.id === sectionId)
+    if (!section || section.data.length === 0) {
+      alert(`No data available for ${section?.label || sectionId}`)
+      return
+    }
+
+    let startTime: string
+    let endTime: string
+
+    const isCustomRange = selectedTimeFrame.minutes === null
+
+    if (isCustomRange) {
+      startTime = new Date(customStartDate).toISOString()
+      endTime = new Date(customEndDate).toISOString()
+    } else {
+      startTime = new Date(Date.now() - (selectedTimeFrame.minutes || 0) * 60 * 1000).toISOString()
+      endTime = new Date().toISOString()
+    }
+
+    const output: any = {
+      time_frame: {
+        label: selectedTimeFrame.label,
+        minutes: selectedTimeFrame.minutes,
+        start_time: startTime,
+        end_time: endTime,
+      },
+    }
+
+    // Add the specific section's data
+    switch (sectionId) {
+      case 'uiEvents':
+        output.ui_events = section.data
+        break
+      case 'userEvents':
+        output.user_events = section.data
+        break
+      case 'uiErrors':
+        output.ui_errors = section.data
+        break
+      case 'serviceErrors':
+        output.service_errors = section.data
+        break
+    }
+
+    const formattedOutput = JSON.stringify(output, null, 2)
+
+    try {
+      await navigator.clipboard.writeText(formattedOutput)
+      setCopiedSection(sectionId)
+      setTimeout(() => setCopiedSection(null), 2000)
+    } catch (err) {
+      // Fallback for browsers that don't support clipboard API
+      const textArea = document.createElement('textarea')
+      textArea.value = formattedOutput
+      textArea.style.position = 'fixed'
+      textArea.style.opacity = '0'
+      document.body.appendChild(textArea)
+      textArea.select()
+      try {
+        document.execCommand('copy')
+        setCopiedSection(sectionId)
+        setTimeout(() => setCopiedSection(null), 2000)
+      } catch (fallbackErr) {
+        alert('Failed to copy to clipboard. Please copy manually.')
+        console.error('Copy failed:', fallbackErr)
+      }
+      document.body.removeChild(textArea)
+    }
   }
 
   const copyEvents = async () => {
@@ -299,6 +371,14 @@ export default function EventsCopy() {
                   {section.label} ({getSectionCount(section.id)})
                 </span>
               </label>
+              <button
+                className="section-copy-button"
+                onClick={() => copySection(section.id)}
+                disabled={loading || section.data.length === 0}
+                title={`Copy ${section.label}`}
+              >
+                {copiedSection === section.id ? '✓ Copied!' : 'Copy'}
+              </button>
             </div>
             {section.enabled && (
               <div className="section-content">
