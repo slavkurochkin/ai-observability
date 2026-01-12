@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import './EventsCopy.css'
+import { addLocalTimestamp } from '../utils/date'
 
 const API_BASE_URL = 'http://localhost:8006'
 
@@ -305,11 +306,15 @@ export default function EventsCopy() {
                   <p className="no-events">No events found in this time frame</p>
                 ) : (
                   <div className="events-list">
-                    {section.data.map((event) => (
-                      <div key={event.id} className="event-item">
-                        <pre className="event-json">{JSON.stringify(event, null, 2)}</pre>
-                      </div>
-                    ))}
+                    {section.data.map((event) => {
+                      // Transform event to include local timestamps
+                      const eventWithLocalTime = addLocalTimestamp(event)
+                      return (
+                        <div key={event.id} className="event-item">
+                          <pre className="event-json">{JSON.stringify(eventWithLocalTime, null, 2)}</pre>
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </div>
