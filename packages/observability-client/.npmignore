@@ -1,9 +1,32 @@
+# Source files (only ship built dist)
 src/
 tsconfig.json
 tsup.config.ts
+jest.config.js
+
+# Tests
+**/__tests__/
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+src/test-setup.ts
+
+# Development files
 .eslintrc.json
 .gitignore
 *.log
 .DS_Store
 node_modules/
 *.tsbuildinfo
+
+# Documentation (keep README and MIGRATION_GUIDE)
+*.md
+!README.md
+!MIGRATION_GUIDE.md
+
+# Scripts
+scripts/
+
+# Config files
+.npmrc
