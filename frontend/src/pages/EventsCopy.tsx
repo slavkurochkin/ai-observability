@@ -5,7 +5,7 @@ const API_BASE_URL = 'http://localhost:8006'
 
 interface TimeFrame {
   label: string
-  minutes: number
+  minutes: number | null // null for custom range
 }
 
 const TIME_FRAMES: TimeFrame[] = [
@@ -15,6 +15,7 @@ const TIME_FRAMES: TimeFrame[] = [
   { label: 'Last Hour', minutes: 60 },
   { label: 'Last 6 Hours', minutes: 360 },
   { label: 'Last 24 Hours', minutes: 1440 },
+  { label: 'Custom Range', minutes: null },
 ]
 
 interface EventSection {
@@ -27,6 +28,8 @@ interface EventSection {
 
 export default function EventsCopy() {
   const [selectedTimeFrame, setSelectedTimeFrame] = useState<TimeFrame>(TIME_FRAMES[0]) // Default: Last 5 Minutes
+  const [customStartDate, setCustomStartDate] = useState<string>('')
+  const [customEndDate, setCustomEndDate] = useState<string>('')
   const [sections, setSections] = useState<EventSection[]>([
     { id: 'uiEvents', label: 'UI Events', enabled: true, data: [], loading: false },
     { id: 'userEvents', label: 'User Events', enabled: true, data: [], loading: false },
@@ -42,11 +45,32 @@ export default function EventsCopy() {
     setError(null)
 
     try {
-      const endDate = new Date()
-      const startDate = new Date(endDate.getTime() - selectedTimeFrame.minutes * 60 * 1000)
+      let startDateISO: string
+      let endDateISO: string
 
-      const startDateISO = startDate.toISOString()
-      const endDateISO = endDate.toISOString()
+      const isCustomRange = selectedTimeFrame.minutes === null
+
+      if (isCustomRange) {
+        if (!customStartDate || !customEndDate) {
+          setError('Please select both start and end dates for custom range')
+          setLoading(false)
+          return
+        }
+        const startDate = new Date(customStartDate)
+        const endDate = new Date(customEndDate)
+        if (endDate <= startDate) {
+          setError('End date must be after start date')
+          setLoading(false)
+          return
+        }
+        startDateISO = startDate.toISOString()
+        endDateISO = endDate.toISOString()
+      } else {
+        const endDate = new Date()
+        const startDate = new Date(endDate.getTime() - (selectedTimeFrame.minutes || 0) * 60 * 1000)
+        startDateISO = startDate.toISOString()
+        endDateISO = endDate.toISOString()
+      }
 
       // Fetch all data in parallel
       const [uiEventsRes, userEventsRes, uiErrorsRes, serviceErrorsRes] = await Promise.all([
@@ -83,7 +107,7 @@ export default function EventsCopy() {
 
   useEffect(() => {
     fetchData()
-  }, [selectedTimeFrame])
+  }, [selectedTimeFrame, customStartDate, customEndDate])
 
   const toggleSection = (sectionId: string) => {
     setSections((prev) =>
@@ -101,12 +125,25 @@ export default function EventsCopy() {
       return
     }
 
+    let startTime: string
+    let endTime: string
+
+    const isCustomRange = selectedTimeFrame.minutes === null
+
+    if (isCustomRange) {
+      startTime = new Date(customStartDate).toISOString()
+      endTime = new Date(customEndDate).toISOString()
+    } else {
+      startTime = new Date(Date.now() - (selectedTimeFrame.minutes || 0) * 60 * 1000).toISOString()
+      endTime = new Date().toISOString()
+    }
+
     const output: any = {
       time_frame: {
         label: selectedTimeFrame.label,
         minutes: selectedTimeFrame.minutes,
-        start_time: new Date(Date.now() - selectedTimeFrame.minutes * 60 * 1000).toISOString(),
-        end_time: new Date().toISOString(),
+        start_time: startTime,
+        end_time: endTime,
       },
       events: {},
     }
@@ -170,19 +207,59 @@ export default function EventsCopy() {
             <label htmlFor="time-frame">Time Frame:</label>
             <select
               id="time-frame"
-              value={selectedTimeFrame.minutes}
+              value={selectedTimeFrame.minutes === null ? 'custom' : selectedTimeFrame.minutes}
               onChange={(e) => {
-                const minutes = parseInt(e.target.value)
-                const frame = TIME_FRAMES.find((f) => f.minutes === minutes) || TIME_FRAMES[0]
-                setSelectedTimeFrame(frame)
+                if (e.target.value === 'custom') {
+                  setSelectedTimeFrame(TIME_FRAMES.find((f) => f.minutes === null) || TIME_FRAMES[0])
+                  // Set default to past 5 minutes
+                  const now = new Date()
+                  const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000)
+                  // Format for datetime-local input (YYYY-MM-DDTHH:mm)
+                  const formatDateTimeLocal = (date: Date) => {
+                    const year = date.getFullYear()
+                    const month = String(date.getMonth() + 1).padStart(2, '0')
+                    const day = String(date.getDate()).padStart(2, '0')
+                    const hours = String(date.getHours()).padStart(2, '0')
+                    const minutes = String(date.getMinutes()).padStart(2, '0')
+                    return `${year}-${month}-${day}T${hours}:${minutes}`
+                  }
+                  setCustomEndDate(formatDateTimeLocal(now))
+                  setCustomStartDate(formatDateTimeLocal(fiveMinutesAgo))
+                } else {
+                  const minutes = parseInt(e.target.value)
+                  const frame = TIME_FRAMES.find((f) => f.minutes === minutes) || TIME_FRAMES[0]
+                  setSelectedTimeFrame(frame)
+                }
               }}
             >
               {TIME_FRAMES.map((frame) => (
-                <option key={frame.minutes} value={frame.minutes}>
+                <option key={frame.minutes === null ? 'custom' : frame.minutes} value={frame.minutes === null ? 'custom' : frame.minutes}>
                   {frame.label}
                 </option>
               ))}
             </select>
+            {selectedTimeFrame.minutes === null && (
+              <div className="custom-date-range">
+                <div className="date-input-group">
+                  <label htmlFor="start-date">Start:</label>
+                  <input
+                    id="start-date"
+                    type="datetime-local"
+                    value={customStartDate}
+                    onChange={(e) => setCustomStartDate(e.target.value)}
+                  />
+                </div>
+                <div className="date-input-group">
+                  <label htmlFor="end-date">End:</label>
+                  <input
+                    id="end-date"
+                    type="datetime-local"
+                    value={customEndDate}
+                    onChange={(e) => setCustomEndDate(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
           </div>
           <button
             className="copy-button"

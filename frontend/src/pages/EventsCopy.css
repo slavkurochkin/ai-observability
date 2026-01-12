@@ -49,6 +49,46 @@
   border-color: #999;
 }
 
+.custom-date-range {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.date-input-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.date-input-group label {
+  font-weight: 500;
+  color: #555;
+  font-size: 0.9rem;
+}
+
+.date-input-group input[type="datetime-local"] {
+  padding: 0.5rem 1rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.95rem;
+  background-color: white;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.date-input-group input[type="datetime-local"]:hover {
+  border-color: #999;
+}
+
+.date-input-group input[type="datetime-local"]:focus {
+  outline: none;
+  border-color: #1976d2;
+  box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.1);
+}
+
 .copy-button {
   padding: 0.75rem 1.5rem;
   background-color: #1976d2;
@@ -196,6 +236,24 @@
   .header-controls {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .time-frame-selector {
+    width: 100%;
+  }
+
+  .custom-date-range {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .date-input-group {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .date-input-group input[type="datetime-local"] {
+    width: 100%;
   }
 
   .copy-button {
