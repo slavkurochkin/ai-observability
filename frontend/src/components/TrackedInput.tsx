@@ -95,13 +95,22 @@ export function TrackedInput({
     }
   };
 
-  return (
-    <input
-      {...props}
-      onChange={handleChange}
-      onFocus={handleFocus}
-      onBlur={handleBlur}
-    />
-  );
+  // Extract value and defaultValue to handle controlled/uncontrolled components properly
+  const { value, defaultValue, ...restProps } = props;
+  
+  // Build input props - only include value if it's defined (for controlled components)
+  const inputProps: any = {
+    ...restProps,
+    onChange: handleChange,
+    onFocus: handleFocus,
+    onBlur: handleBlur,
+  };
+  
+  // Only set value if it's defined (including empty string for controlled components)
+  if (value !== undefined) {
+    inputProps.value = value;
+  }
+  
+  return <input {...inputProps} />;
 }
 

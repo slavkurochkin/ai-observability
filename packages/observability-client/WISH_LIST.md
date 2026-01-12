@@ -1,0 +1,7 @@
+- trackng sessions (start/stop) so I can pinpoint to a session currently debugged
+- AI for test geeneration
+- Grouping errors by name/type, should show number of times the error seen and when was the last time
+- Permannanet error storage, store unique errors and solutions to solve it in a permanent table (never gets whiped out), a model that resolved the issue
+- Once permanent table in place we should compare errors against it and see: if the issue is new or seen in the other application (or same), 
+- ability to copy events by group type (only: UI Events, Services Events, UI Errors, Service Errors)
+- Make UI more stylysh wirh light/dark mode
