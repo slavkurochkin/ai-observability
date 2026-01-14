@@ -8,7 +8,7 @@ import sys
 from sqlalchemy import create_engine, inspect
 from models import Base
 # Import all models to ensure they're registered with Base
-from models import UserEvent, UserSession, UIEvent, UIError, ServiceError
+from models import UserEvent, UserSession, UIEvent, UIError, ServiceError, RecordedSession
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
@@ -49,6 +49,11 @@ def create_tables():
         print("✓ service_errors table created successfully")
     else:
         print("✗ service_errors table NOT found")
+    
+    if 'recorded_sessions' in new_tables:
+        print("✓ recorded_sessions table created successfully")
+    else:
+        print("✗ recorded_sessions table NOT found")
     
     print("\nDone!")
 

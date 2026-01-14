@@ -89,6 +89,59 @@
   box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.1);
 }
 
+.session-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background-color: #f9f9f9;
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+}
+
+.session-selector label {
+  font-weight: 500;
+  color: #555;
+  font-size: 0.9rem;
+}
+
+.session-selector select {
+  padding: 0.5rem 1rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.95rem;
+  background-color: white;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.session-selector select:hover {
+  border-color: #999;
+}
+
+.session-selector select:focus {
+  outline: none;
+  border-color: #1976d2;
+  box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.1);
+}
+
+.session-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: #666;
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background-color: white;
+  border-radius: 4px;
+}
+
+.session-info span {
+  display: block;
+}
+
 .copy-button {
   padding: 0.75rem 1.5rem;
   background-color: #1976d2;

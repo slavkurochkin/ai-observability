@@ -176,3 +176,22 @@ class ServiceError(Base):
         Index('idx_service_errors_severity_timestamp', 'severity', 'timestamp'),
     )
 
+class RecordedSession(Base):
+    """
+    Table for storing manually recorded sessions.
+    Users can start/stop recording sessions and use them to filter events by time frame.
+    """
+    __tablename__ = "recorded_sessions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=True)  # Optional name for the session
+    started_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    ended_at = Column(DateTime, nullable=True, index=True)
+    duration_seconds = Column(Integer, nullable=True)  # Calculated duration
+    notes = Column(Text, nullable=True)  # Optional notes about the session
+    session_metadata = Column(JSON, nullable=True)  # Additional flexible metadata (renamed from 'metadata' to avoid SQLAlchemy reserved word)
+    
+    __table_args__ = (
+        Index('idx_recorded_sessions_started', 'started_at'),
+        Index('idx_recorded_sessions_ended', 'ended_at'),
+    )

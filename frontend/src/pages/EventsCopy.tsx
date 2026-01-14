@@ -1,12 +1,23 @@
 import { useState, useEffect } from 'react'
 import './EventsCopy.css'
-import { addLocalTimestamp } from '../utils/date'
+import { addLocalTimestamp, formatTimestampToLocal } from '../utils/date'
+import SessionRecorder from '../components/SessionRecorder'
 
 const API_BASE_URL = 'http://localhost:8006'
 
 interface TimeFrame {
   label: string
   minutes: number | null // null for custom range
+}
+
+interface RecordedSession {
+  id: number
+  name: string | null
+  started_at: string
+  ended_at: string | null
+  duration_seconds: number | null
+  notes: string | null
+  session_metadata: any
 }
 
 const TIME_FRAMES: TimeFrame[] = [
@@ -17,6 +28,7 @@ const TIME_FRAMES: TimeFrame[] = [
   { label: 'Last 6 Hours', minutes: 360 },
   { label: 'Last 24 Hours', minutes: 1440 },
   { label: 'Custom Range', minutes: null },
+  { label: 'From Session', minutes: null }, // Special option for session selection
 ]
 
 interface EventSection {
@@ -31,6 +43,8 @@ export default function EventsCopy() {
   const [selectedTimeFrame, setSelectedTimeFrame] = useState<TimeFrame>(TIME_FRAMES[0]) // Default: Last 5 Minutes
   const [customStartDate, setCustomStartDate] = useState<string>('')
   const [customEndDate, setCustomEndDate] = useState<string>('')
+  const [selectedSession, setSelectedSession] = useState<RecordedSession | null>(null)
+  const [sessions, setSessions] = useState<RecordedSession[]>([])
   const [sections, setSections] = useState<EventSection[]>([
     { id: 'uiEvents', label: 'UI Events', enabled: true, data: [], loading: false },
     { id: 'userEvents', label: 'User Events', enabled: true, data: [], loading: false },
@@ -42,6 +56,70 @@ export default function EventsCopy() {
   const [copied, setCopied] = useState(false)
   const [copiedSection, setCopiedSection] = useState<string | null>(null)
 
+  useEffect(() => {
+    fetchSessions()
+  }, [])
+
+  const fetchSessions = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/sessions/record?limit=100&include_active=false`)
+      if (response.ok) {
+        const data = await response.json()
+        setSessions(data)
+      } else {
+        // Silently fail for sessions - it's optional functionality
+        setSessions([])
+      }
+    } catch (error: any) {
+      // Silently fail for sessions - connection errors are expected if backend is down
+      setSessions([])
+      // Only log in development
+      if (process.env.NODE_ENV === 'development') {
+        console.debug('Sessions endpoint unavailable:', error.message)
+      }
+    }
+  }
+
+  const handleSessionSelected = (session: RecordedSession) => {
+    setSelectedSession(session)
+    setSelectedTimeFrame(TIME_FRAMES.find(f => f.label === 'From Session') || TIME_FRAMES[0])
+    
+    // Format dates for datetime-local input
+    // datetime-local expects local time, so we convert UTC to local
+    const formatDateTimeLocal = (utcTimestamp: string) => {
+      // Ensure the timestamp is treated as UTC by appending 'Z' if not present
+      let timestampStr = utcTimestamp.trim()
+      if (!timestampStr.endsWith('Z') && !timestampStr.match(/[+-]\d{2}:?\d{2}$/)) {
+        // Handle microseconds - JavaScript Date only supports milliseconds
+        timestampStr = timestampStr.replace(/\.(\d{6})(\d*)/, (match, microsecs) => {
+          const millisecs = microsecs.substring(0, 3)
+          return `.${millisecs}`
+        })
+        timestampStr = timestampStr + 'Z'
+      } else {
+        // Has timezone, but might have microseconds - convert those too
+        timestampStr = timestampStr.replace(/\.(\d{6})(\d*)/, (match, microsecs) => {
+          const millisecs = microsecs.substring(0, 3)
+          return `.${millisecs}`
+        })
+      }
+      
+      // Create Date object from UTC timestamp - this will be converted to local time
+      const date = new Date(timestampStr)
+      
+      // getFullYear(), getMonth(), etc. return local time values
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      const hours = String(date.getHours()).padStart(2, '0')
+      const minutes = String(date.getMinutes()).padStart(2, '0')
+      return `${year}-${month}-${day}T${hours}:${minutes}`
+    }
+    
+    setCustomStartDate(formatDateTimeLocal(session.started_at))
+    setCustomEndDate(session.ended_at ? formatDateTimeLocal(session.ended_at) : formatDateTimeLocal(new Date().toISOString()))
+  }
+
   const fetchData = async () => {
     setLoading(true)
     setError(null)
@@ -51,8 +129,15 @@ export default function EventsCopy() {
       let endDateISO: string
 
       const isCustomRange = selectedTimeFrame.minutes === null
+      const isSessionRange = selectedTimeFrame.label === 'From Session'
 
-      if (isCustomRange) {
+      if (isSessionRange && selectedSession) {
+        // Use session time range
+        startDateISO = new Date(selectedSession.started_at).toISOString()
+        endDateISO = selectedSession.ended_at
+          ? new Date(selectedSession.ended_at).toISOString()
+          : new Date().toISOString()
+      } else if (isCustomRange) {
         if (!customStartDate || !customEndDate) {
           setError('Please select both start and end dates for custom range')
           setLoading(false)
@@ -74,34 +159,80 @@ export default function EventsCopy() {
         endDateISO = endDate.toISOString()
       }
 
-      // Fetch all data in parallel
-      const [uiEventsRes, userEventsRes, uiErrorsRes, serviceErrorsRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/ui-events?start_date=${startDateISO}&end_date=${endDateISO}&limit=10000`),
-        fetch(`${API_BASE_URL}/events?start_date=${startDateISO}&end_date=${endDateISO}&limit=10000`),
-        fetch(`${API_BASE_URL}/errors/ui?start_date=${startDateISO}&end_date=${endDateISO}&limit=10000`),
-        fetch(`${API_BASE_URL}/errors/services?start_date=${startDateISO}&end_date=${endDateISO}&limit=10000`),
-      ])
-
-      if (!uiEventsRes.ok || !userEventsRes.ok || !uiErrorsRes.ok || !serviceErrorsRes.ok) {
-        throw new Error('Failed to fetch data from observability service')
+      // Fetch all data in parallel with error handling per request
+      const fetchWithErrorHandling = async (url: string, sectionId: string) => {
+        try {
+          const response = await fetch(url)
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+          }
+          return await response.json()
+        } catch (error: any) {
+          // Check if it's a connection error (network failure, connection refused, etc.)
+          const errorMessage = error?.message || String(error) || ''
+          const isConnectionError = 
+            errorMessage.includes('Failed to fetch') || 
+            errorMessage.includes('ERR_CONNECTION_REFUSED') ||
+            errorMessage.includes('NetworkError') ||
+            errorMessage.includes('Network request failed') ||
+            error instanceof TypeError // Fetch API throws TypeError on network errors
+          
+          if (isConnectionError) {
+            throw new Error(`Cannot connect to observability service at ${API_BASE_URL}. Please ensure the backend service is running.`)
+          }
+          throw error
+        }
       }
 
-      const [uiEvents, userEvents, uiErrors, serviceErrors] = await Promise.all([
-        uiEventsRes.json(),
-        userEventsRes.json(),
-        uiErrorsRes.json(),
-        serviceErrorsRes.json(),
+      const [uiEvents, userEvents, uiErrors, serviceErrors] = await Promise.allSettled([
+        fetchWithErrorHandling(`${API_BASE_URL}/ui-events?start_date=${startDateISO}&end_date=${endDateISO}&limit=10000`, 'uiEvents'),
+        fetchWithErrorHandling(`${API_BASE_URL}/events?start_date=${startDateISO}&end_date=${endDateISO}&limit=10000`, 'userEvents'),
+        fetchWithErrorHandling(`${API_BASE_URL}/errors/ui?start_date=${startDateISO}&end_date=${endDateISO}&limit=10000`, 'uiErrors'),
+        fetchWithErrorHandling(`${API_BASE_URL}/errors/services?start_date=${startDateISO}&end_date=${endDateISO}&limit=10000`, 'serviceErrors'),
       ])
 
+      // Extract results or use empty arrays on failure
+      const getResult = (result: PromiseSettledResult<any[]>) => 
+        result.status === 'fulfilled' ? result.value : []
+
+      const uiEventsData = getResult(uiEvents)
+      const userEventsData = getResult(userEvents)
+      const uiErrorsData = getResult(uiErrors)
+      const serviceErrorsData = getResult(serviceErrors)
+
+      // Check if all requests failed
+      const allFailed = [uiEvents, userEvents, uiErrors, serviceErrors].every(
+        r => r.status === 'rejected'
+      )
+
+      if (allFailed) {
+        const firstError = [uiEvents, userEvents, uiErrors, serviceErrors].find(r => r.status === 'rejected')
+        if (firstError && firstError.status === 'rejected') {
+          throw firstError.reason
+        }
+      }
+
       setSections((prevSections) => [
-        { id: 'uiEvents', label: 'UI Events', enabled: prevSections[0].enabled, data: uiEvents, loading: false },
-        { id: 'userEvents', label: 'User Events', enabled: prevSections[1].enabled, data: userEvents, loading: false },
-        { id: 'uiErrors', label: 'UI Errors', enabled: prevSections[2].enabled, data: uiErrors, loading: false },
-        { id: 'serviceErrors', label: 'Service Errors', enabled: prevSections[3].enabled, data: serviceErrors, loading: false },
+        { id: 'uiEvents', label: 'UI Events', enabled: prevSections[0].enabled, data: uiEventsData, loading: false },
+        { id: 'userEvents', label: 'User Events', enabled: prevSections[1].enabled, data: userEventsData, loading: false },
+        { id: 'uiErrors', label: 'UI Errors', enabled: prevSections[2].enabled, data: uiErrorsData, loading: false },
+        { id: 'serviceErrors', label: 'Service Errors', enabled: prevSections[3].enabled, data: serviceErrorsData, loading: false },
       ])
+
+      // Show warning if some requests failed but not all
+      const someFailed = [uiEvents, userEvents, uiErrors, serviceErrors].some(
+        r => r.status === 'rejected'
+      )
+      if (someFailed && !allFailed) {
+        setError('Some data could not be loaded. Please check your connection and try again.')
+      }
     } catch (err: any) {
-      setError(err.message || 'Failed to load events')
-      console.error('Events fetch error:', err)
+      const errorMessage = err.message || 'Failed to load events'
+      setError(errorMessage)
+      // Only log detailed errors in development
+      if (process.env.NODE_ENV === 'development') {
+        console.debug('Events fetch error:', err)
+      }
     } finally {
       setLoading(false)
     }
@@ -109,7 +240,7 @@ export default function EventsCopy() {
 
   useEffect(() => {
     fetchData()
-  }, [selectedTimeFrame, customStartDate, customEndDate])
+  }, [selectedTimeFrame, customStartDate, customEndDate, selectedSession])
 
   const toggleSection = (sectionId: string) => {
     setSections((prev) =>
@@ -130,8 +261,14 @@ export default function EventsCopy() {
     let endTime: string
 
     const isCustomRange = selectedTimeFrame.minutes === null
+    const isSessionRange = selectedTimeFrame.label === 'From Session'
 
-    if (isCustomRange) {
+    if (isSessionRange && selectedSession) {
+      startTime = new Date(selectedSession.started_at).toISOString()
+      endTime = selectedSession.ended_at
+        ? new Date(selectedSession.ended_at).toISOString()
+        : new Date().toISOString()
+    } else if (isCustomRange) {
       startTime = new Date(customStartDate).toISOString()
       endTime = new Date(customEndDate).toISOString()
     } else {
@@ -202,8 +339,14 @@ export default function EventsCopy() {
     let endTime: string
 
     const isCustomRange = selectedTimeFrame.minutes === null
+    const isSessionRange = selectedTimeFrame.label === 'From Session'
 
-    if (isCustomRange) {
+    if (isSessionRange && selectedSession) {
+      startTime = new Date(selectedSession.started_at).toISOString()
+      endTime = selectedSession.ended_at
+        ? new Date(selectedSession.ended_at).toISOString()
+        : new Date().toISOString()
+    } else if (isCustomRange) {
       startTime = new Date(customStartDate).toISOString()
       endTime = new Date(customEndDate).toISOString()
     } else {
@@ -273,6 +416,11 @@ export default function EventsCopy() {
 
   return (
     <div className="events-copy">
+      <SessionRecorder onSessionEnded={async (session) => {
+        await fetchSessions()
+        handleSessionSelected(session)
+      }} />
+      
       <div className="events-copy-header">
         <h1>Copy Events for LLM</h1>
         <div className="header-controls">
@@ -280,10 +428,12 @@ export default function EventsCopy() {
             <label htmlFor="time-frame">Time Frame:</label>
             <select
               id="time-frame"
-              value={selectedTimeFrame.minutes === null ? 'custom' : selectedTimeFrame.minutes}
+              value={selectedTimeFrame.label === 'From Session' ? 'session' : (selectedTimeFrame.minutes === null ? 'custom' : selectedTimeFrame.minutes)}
               onChange={(e) => {
-                if (e.target.value === 'custom') {
-                  setSelectedTimeFrame(TIME_FRAMES.find((f) => f.minutes === null) || TIME_FRAMES[0])
+                if (e.target.value === 'session') {
+                  setSelectedTimeFrame(TIME_FRAMES.find((f) => f.label === 'From Session') || TIME_FRAMES[0])
+                } else if (e.target.value === 'custom') {
+                  setSelectedTimeFrame(TIME_FRAMES.find((f) => f.minutes === null && f.label !== 'From Session') || TIME_FRAMES[0])
                   // Set default to past 5 minutes
                   const now = new Date()
                   const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000)
@@ -302,16 +452,49 @@ export default function EventsCopy() {
                   const minutes = parseInt(e.target.value)
                   const frame = TIME_FRAMES.find((f) => f.minutes === minutes) || TIME_FRAMES[0]
                   setSelectedTimeFrame(frame)
+                  setSelectedSession(null)
                 }
               }}
             >
               {TIME_FRAMES.map((frame) => (
-                <option key={frame.minutes === null ? 'custom' : frame.minutes} value={frame.minutes === null ? 'custom' : frame.minutes}>
+                <option key={frame.label === 'From Session' ? 'session' : (frame.minutes === null ? 'custom' : frame.minutes)} value={frame.label === 'From Session' ? 'session' : (frame.minutes === null ? 'custom' : frame.minutes)}>
                   {frame.label}
                 </option>
               ))}
             </select>
-            {selectedTimeFrame.minutes === null && (
+            {selectedTimeFrame.label === 'From Session' && (
+              <div className="session-selector">
+                <label htmlFor="session-select">Select Session:</label>
+                <select
+                  id="session-select"
+                  value={selectedSession?.id || ''}
+                  onChange={(e) => {
+                    const sessionId = parseInt(e.target.value)
+                    const session = sessions.find(s => s.id === sessionId)
+                    if (session) {
+                      handleSessionSelected(session)
+                    }
+                  }}
+                >
+                  <option value="">-- Select a session --</option>
+                  {sessions
+                    .filter(s => s.ended_at !== null)
+                    .map((session) => (
+                      <option key={session.id} value={session.id}>
+                        {session.name || `Session ${session.id}`} ({formatTimestampToLocal(session.started_at)})
+                      </option>
+                    ))}
+                </select>
+                {selectedSession && (
+                  <div className="session-info">
+                    <span>Start: {formatTimestampToLocal(selectedSession.started_at)}</span>
+                    <span>End: {selectedSession.ended_at ? formatTimestampToLocal(selectedSession.ended_at) : 'N/A'}</span>
+                    <span>Duration: {selectedSession.duration_seconds ? `${Math.floor(selectedSession.duration_seconds / 60)}m ${selectedSession.duration_seconds % 60}s` : 'N/A'}</span>
+                  </div>
+                )}
+              </div>
+            )}
+            {(selectedTimeFrame.minutes === null && selectedTimeFrame.label !== 'From Session') && (
               <div className="custom-date-range">
                 <div className="date-input-group">
                   <label htmlFor="start-date">Start:</label>

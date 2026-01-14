@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import os
 import asyncio
 from contextlib import asynccontextmanager
-from models import Base, UserEvent, UserSession, UIEvent, UIError, ServiceError
+from models import Base, UserEvent, UserSession, UIEvent, UIError, ServiceError, RecordedSession
 from database import get_db, engine
 from otel_setup import setup_opentelemetry, instrument_fastapi, instrument_sqlalchemy
 from opentelemetry import trace
@@ -50,11 +50,14 @@ async def cleanup_old_events():
                 deleted_service_errors = db.query(ServiceError).filter(
                     ServiceError.timestamp < cutoff_date
                 ).delete()
+                deleted_recorded_sessions = db.query(RecordedSession).filter(
+                    RecordedSession.started_at < cutoff_date
+                ).delete()
                 db.commit()
                 
-                total_deleted = deleted_user_events + deleted_ui_events + deleted_ui_errors + deleted_service_errors
+                total_deleted = deleted_user_events + deleted_ui_events + deleted_ui_errors + deleted_service_errors + deleted_recorded_sessions
                 if total_deleted > 0:
-                    logger.info(f"Auto-cleanup: Deleted {deleted_user_events} user events, {deleted_ui_events} UI events, {deleted_ui_errors} UI errors, and {deleted_service_errors} service errors older than {RETENTION_DAYS} days")
+                    logger.info(f"Auto-cleanup: Deleted {deleted_user_events} user events, {deleted_ui_events} UI events, {deleted_ui_errors} UI errors, {deleted_service_errors} service errors, and {deleted_recorded_sessions} recorded sessions older than {RETENTION_DAYS} days")
             except Exception as e:
                 db.rollback()
                 logger.error(f"Auto-cleanup error: {e}", exc_info=True)
@@ -107,6 +110,7 @@ app = FastAPI(
         {"name": "Events", "description": "User event tracking"},
         {"name": "UI Events", "description": "UI interaction tracking"},
         {"name": "Errors", "description": "Error tracking (UI and service errors)"},
+        {"name": "Sessions", "description": "Session recording and management"},
         {"name": "Analytics", "description": "Analytics and statistics"},
         {"name": "Health", "description": "Health check endpoints"}
     ],
@@ -261,10 +265,12 @@ async def cleanup_events(
     ui_events_query = db.query(UIEvent).filter(UIEvent.timestamp < cutoff_date)
     ui_errors_query = db.query(UIError).filter(UIError.timestamp < cutoff_date)
     service_errors_query = db.query(ServiceError).filter(ServiceError.timestamp < cutoff_date)
+    recorded_sessions_query = db.query(RecordedSession).filter(RecordedSession.started_at < cutoff_date)
     user_events_count = user_events_query.count()
     ui_events_count = ui_events_query.count()
     ui_errors_count = ui_errors_query.count()
     service_errors_count = service_errors_query.count()
+    recorded_sessions_count = recorded_sessions_query.count()
     
     if dry_run:
         return {
@@ -273,7 +279,8 @@ async def cleanup_events(
             "ui_events_to_delete": ui_events_count,
             "ui_errors_to_delete": ui_errors_count,
             "service_errors_to_delete": service_errors_count,
-            "total_events_to_delete": user_events_count + ui_events_count + ui_errors_count + service_errors_count,
+            "recorded_sessions_to_delete": recorded_sessions_count,
+            "total_events_to_delete": user_events_count + ui_events_count + ui_errors_count + service_errors_count + recorded_sessions_count,
             "cutoff_date": cutoff_date.isoformat(),
             "retention_days": retention_days
         }
@@ -282,6 +289,7 @@ async def cleanup_events(
     deleted_ui_events = ui_events_query.delete()
     deleted_ui_errors = ui_errors_query.delete()
     deleted_service_errors = service_errors_query.delete()
+    deleted_recorded_sessions = recorded_sessions_query.delete()
     db.commit()
     
     return {
@@ -290,7 +298,8 @@ async def cleanup_events(
         "deleted_ui_events": deleted_ui_events,
         "deleted_ui_errors": deleted_ui_errors,
         "deleted_service_errors": deleted_service_errors,
-        "total_deleted": deleted_user_events + deleted_ui_events + deleted_ui_errors + deleted_service_errors,
+        "deleted_recorded_sessions": deleted_recorded_sessions,
+        "total_deleted": deleted_user_events + deleted_ui_events + deleted_ui_errors + deleted_service_errors + deleted_recorded_sessions,
         "cutoff_date": cutoff_date.isoformat(),
         "retention_days": retention_days
     }
@@ -303,6 +312,7 @@ async def get_stats(db: Session = Depends(get_db)):
     total_ui_errors = db.query(UIError).count()
     total_service_errors = db.query(ServiceError).count()
     total_sessions = db.query(UserSession).count()
+    total_recorded_sessions = db.query(RecordedSession).count()
     
     # Oldest and newest events
     oldest_event = db.query(func.min(UserEvent.timestamp)).scalar()
@@ -347,6 +357,7 @@ async def get_stats(db: Session = Depends(get_db)):
         "total_service_errors": total_service_errors,
         "total_errors": total_ui_errors + total_service_errors,
         "total_sessions": total_sessions,
+        "total_recorded_sessions": total_recorded_sessions,
         "oldest_event": oldest_event.isoformat() if oldest_event else None,
         "newest_event": newest_event.isoformat() if newest_event else None,
         "oldest_ui_event": oldest_ui_event.isoformat() if oldest_ui_event else None,
@@ -901,6 +912,103 @@ async def get_total_errors(
         "start_date": start_date,
         "end_date": end_date
     }
+
+# Session recording endpoints
+class RecordedSessionCreate(BaseModel):
+    name: Optional[str] = None
+    notes: Optional[str] = None
+    session_metadata: Optional[Dict[str, Any]] = None
+
+class RecordedSessionResponse(BaseModel):
+    id: int
+    name: Optional[str]
+    started_at: datetime
+    ended_at: Optional[datetime]
+    duration_seconds: Optional[int]
+    notes: Optional[str]
+    session_metadata: Optional[Dict[str, Any]]
+    
+    class Config:
+        from_attributes = True
+
+class RecordedSessionUpdate(BaseModel):
+    name: Optional[str] = None
+    notes: Optional[str] = None
+    session_metadata: Optional[Dict[str, Any]] = None
+
+@app.post("/sessions/record", response_model=RecordedSessionResponse, tags=["Sessions"], summary="Start recording a session")
+async def start_recording_session(
+    session: RecordedSessionCreate,
+    db: Session = Depends(get_db)
+):
+    """Start recording a new session"""
+    db_session = RecordedSession(
+        name=session.name,
+        notes=session.notes,
+        session_metadata=session.session_metadata,
+        started_at=datetime.utcnow()
+    )
+    db.add(db_session)
+    db.commit()
+    db.refresh(db_session)
+    logger.info(f"Started recording session: ID={db_session.id}, name={session.name}")
+    return db_session
+
+@app.post("/sessions/record/{session_id}/end", response_model=RecordedSessionResponse, tags=["Sessions"], summary="End recording a session")
+async def end_recording_session(
+    session_id: int,
+    update: Optional[RecordedSessionUpdate] = None,
+    db: Session = Depends(get_db)
+):
+    """End recording a session"""
+    db_session = db.query(RecordedSession).filter(RecordedSession.id == session_id).first()
+    if not db_session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if db_session.ended_at:
+        raise HTTPException(status_code=400, detail="Session already ended")
+    
+    db_session.ended_at = datetime.utcnow()
+    duration = (db_session.ended_at - db_session.started_at).total_seconds()
+    db_session.duration_seconds = int(duration)
+    
+    if update:
+        if update.name is not None:
+            db_session.name = update.name
+        if update.notes is not None:
+            db_session.notes = update.notes
+        if update.session_metadata is not None:
+            db_session.session_metadata = update.session_metadata
+    
+    db.commit()
+    db.refresh(db_session)
+    logger.info(f"Ended recording session: ID={session_id}, duration={db_session.duration_seconds}s")
+    return db_session
+
+@app.get("/sessions/record", response_model=List[RecordedSessionResponse], tags=["Sessions"], summary="List recorded sessions")
+async def list_recorded_sessions(
+    limit: int = 100,
+    include_active: bool = True,
+    db: Session = Depends(get_db)
+):
+    """List all recorded sessions"""
+    query = db.query(RecordedSession)
+    
+    if not include_active:
+        query = query.filter(RecordedSession.ended_at.isnot(None))
+    
+    sessions = query.order_by(RecordedSession.started_at.desc()).limit(limit).all()
+    return sessions
+
+@app.get("/sessions/record/{session_id}", response_model=RecordedSessionResponse, tags=["Sessions"], summary="Get a recorded session")
+async def get_recorded_session(
+    session_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get a specific recorded session"""
+    session = db.query(RecordedSession).filter(RecordedSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
 
 @app.get("/health", tags=["Health"], summary="Health check")
 async def health():
